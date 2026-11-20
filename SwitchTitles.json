@@ -1,0 +1,103 @@
+{
+    "_note": "Switch title IDs -> game names. Titles starting with _ are ignored. Add more with:  python savemanager.py switch",
+    "0100C1F0051B6000": {
+        "Name": "Donkey Kong Country Tropical Freeze",
+        "RyujinxSteamDeck": "000000000000000f/0"
+    },
+    "010019A01E2F2000": {
+        "Name": "Metroid Prime 4 Beyond"
+    },
+    "010067300059A000": {
+        "Name": "Mario + Rabbids Kingdom Battle"
+    },
+    "010093801237C000": {
+        "Name": "Metroid Dread"
+    },
+    "0100152000022000": {
+        "Name": "Mario Kart 8 Deluxe"
+    },
+    "01006A800016E000": {
+        "Name": "Super Smash Bros Ultimate"
+    },
+    "0100E95004038000": {
+        "Name": "Xenoblade Chronicles 2",
+        "RyujinxSteamDeck": "000000000000000e/0"
+    },
+    "0100BC0018138000": {
+        "Name": "Super Mario RPG"
+    },
+    "010012101468C000": {
+        "Name": "Metroid Prime Remastered"
+    },
+    "0100317013770000": {
+        "Name": "Mario + Rabbids Sparks of Hope"
+    },
+    "010055D009F78000": {
+        "Name": "Fire Emblem Three Houses",
+        "RyujinxSteamDeck": "0000000000000005/0"
+    },
+    "0100A6301214E000": {
+        "Name": "Fire Emblem Engage",
+        "RyujinxSteamDeck": "0000000000000004/0"
+    },
+    "01002DA013484000": {
+        "Name": "Zelda Skyward Sword HD"
+    },
+    "01006BB00C6F0000": {
+        "Name": "Zelda Links Awakening"
+    },
+    "01007EF00011E000": {
+        "Name": "Zelda Breath of the Wild"
+    },
+    "0100F2C0115B6000": {
+        "Name": "Zelda Tears of the Kingdom"
+    },
+    "010048701995E000": {
+        "Name": "Luigis Mansion 2 HD"
+    },
+    "0100DCA0064A6000": {
+        "Name": "Luigis Mansion 3"
+    },
+    "0100000000010000": {
+        "Name": "Super Mario Odyssey"
+    },
+    "010015100B514000": {
+        "Name": "Super Mario Bros Wonder"
+    },
+    "010028600EBDA000": {
+        "Name": "Super Mario 3D World + Bowsers Fury"
+    },
+    "010036B0034E4000": {
+        "Name": "Super Mario Party"
+    },
+    "010049900F546000": {
+        "Name": "Super Mario 3D All-Stars"
+    },
+    "0100965017338000": {
+        "Name": "Super Mario Party Jamboree"
+    },
+    "0100B99019412000": {
+        "Name": "Mario vs Donkey Kong"
+    },
+    "0100BDE00862A000": {
+        "Name": "Mario Tennis Aces"
+    },
+    "0100ECD018EBE000": {
+        "Name": "Paper Mario The Thousand-Year Door"
+    },
+    "0100A3900C3E2000": {
+        "Name": "Paper Mario The Origami King"
+    },
+    "010074F013262000": {
+        "Name": "Xenoblade Chronicles 3"
+    },
+    "0100A3D008C5C000": {
+        "Name": "Pokemon Scarlet"
+    },
+    "01008F6008C5E000": {
+        "Name": "Pokemon Violet"
+    },
+    "01008CF01BAAC000": {
+        "Name": "Zelda Echoes of Wisdom"
+    }
+}

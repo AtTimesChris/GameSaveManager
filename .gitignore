@@ -24,3 +24,6 @@ myID*
 
 # Agent tools (not core app code)
 .agents/skills/
+V14-GUIDE.txt
+NasAutoMount.sh
+NasMount.sh

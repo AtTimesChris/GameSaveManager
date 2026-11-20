@@ -1,0 +1,8 @@
+{
+    "_note": "Names for per-game emulator folders: { \"Label\": { \"folder name or first 9 characters\": \"Game name\" } }. Add with: python savemanager.py library",
+    "RPCS3": {},
+    "PPSSPP": {},
+    "Azahar": {},
+    "ShadPS4": {},
+    "Dolphin Wii": {}
+}
