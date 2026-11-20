@@ -1,0 +1,26 @@
+# Configuration files with real paths/addresses
+config.json
+Games.json
+*.json                    # Exclude ALL JSON files (catch-all for configs)
+
+# Logs and state
+Logs/*
+**/Logs/**                # Also ignore nested log folders
+State/*.json
+**/State/*.json
+
+# Backup contents (keep .gitignore if you use it, but don't commit backups)
+Backups/*
+**/Backups/*
+
+# Your ID files with real identifiers  
+myID*
+*.steam_id
+*.id
+
+# Environment variables (if any)
+.env
+.env.local
+
+# Agent tools (not core app code)
+.agents/skills/
