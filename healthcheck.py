@@ -286,6 +286,56 @@ def check_pending(sm, config, platform):
             say("warn", f"{len(stuck)} upload(s) look stuck (marker older than 2 hours)", ", ".join(stuck[:4]))
 
 
+def check_switch(sm, config, platform):
+    title("Switch and categories")
+
+    try:
+        import switchunify
+        raw = sm.load_config()
+    except (ImportError, OSError, ValueError):
+        say("info", "switchunify.py is missing next to savemanager.py")
+        return
+
+    old = switchunify.old_entries(raw)
+
+    if old:
+        say("warn", f"{len(old)} whole-folder Switch emulator entr{'y' if len(old) == 1 else 'ies'}: "
+                    + ", ".join(g["Name"] for g, _ in old),
+            "each holds every game; restoring one can overwrite another game's progress")
+        say("info", "Fix: T More tools > Switch: one save for all emulators (or: python savemanager.py switchunify)")
+
+    stale = 0
+
+    for game in config["Games"]:
+        if game.get("SwitchCopies"):
+            try:
+                import switchunify as su
+                stale += 1 if su.copies_out_of_step(sm, game, platform) else 0
+            except OSError:
+                pass
+
+    switch_games = [g for g in config["Games"] if g.get("SwitchTitleID")]
+
+    if switch_games:
+        if stale:
+            say("info", f"{stale} Switch game(s) have an emulator with an older copy (updated at the next backup or launch)")
+        else:
+            say("ok", f"{len(switch_games)} Switch game(s); every emulator has the newest save")
+
+    misspelt = [g["Name"] for g in raw.get("Games", []) if "Catagory" in g]
+
+    if misspelt:
+        say("info", f"{len(misspelt)} game(s) use the spelling 'Catagory'", "T More tools > Auto-assign categories fixes it")
+
+    state = sm.load_menu_state(sm.get_device_name(config.get("Settings", {}), platform))
+    plain = [g["Name"] for g in config["Games"]
+             if [c.lower() for c in sm.game_categories(g, state)] == [str(g.get("Platform", "")).strip().lower()]]
+
+    if plain:
+        say("info", f"{len(plain)} game(s) only show under their Platform (no genres)",
+            "T More tools > Auto-assign categories")
+
+
 def check_steam(sm, config, platform):
     title("Steam shortcuts")
 
@@ -337,7 +387,7 @@ def health(sm, config, platform):
     print(f" HEALTH CHECK   {sm.get_device_name(config.get('Settings', {}), platform)} ({platform})")
     print("=" * 56)
 
-    for check in (check_games, check_settings, check_network, check_pending, check_steam):
+    for check in (check_games, check_settings, check_network, check_pending, check_steam, check_switch):
         try:
             check(sm, config, platform)
         except Exception as error:

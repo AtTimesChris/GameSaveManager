@@ -579,8 +579,8 @@ def state_word(count):
 def backup_shortcuts(sm, path, label):
     """
     Copies shortcuts.vdf into Backups/Steam shortcuts/ with a name that says what it holds:
-      shortcuts_85799292_2026-11-05_21-14-02_before-setup_clean.vdf              (no manager lines in it)
-      shortcuts_85799292_2026-11-05_21-14-02_before-reset_6-with-manager-lines.vdf
+      shortcuts_12345678_2026-11-05_21-14-02_before-setup_clean.vdf              (no manager lines in it)
+      shortcuts_12345678_2026-11-05_21-14-02_before-reset_6-with-manager-lines.vdf
     """
     user = Path(path).parent.parent.name              # the number folder inside userdata
     sm.BACKUP_STEAM.mkdir(parents=True, exist_ok=True)

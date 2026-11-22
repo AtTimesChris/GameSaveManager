@@ -1,3 +1,29 @@
+# Game Save Manager - files that must never be uploaded.
+# (A # note only works at the START of a line in .gitignore.)
+
+# Your own data
+Games.json
+Games.json.tmp
+MyIDs.json
+SteamMatches.json
+Games.catalogue.json
+State/
+Logs/
+Backups/
+*.bak-*
+
+# Your own copies hold your NAS address - upload the "- Example" copies instead
+NasMount.sh
+NasAutoMount.sh
+
+# Upgrade packages and Python's compiled files
+*.zip
+__pycache__/
+*.pyc
+
+# Agent tools (not part of the program)
+.agents/skills/
+
 # Configuration files with real paths/addresses
 config.json
 Games.json

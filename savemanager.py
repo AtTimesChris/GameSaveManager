@@ -54,7 +54,7 @@ import time        # pauses (like Start-Sleep)
 from datetime import datetime
 from pathlib import Path   # Path objects: folders and files that work on both OSes
 
-__version__ = "14.5.4"
+__version__ = "14.6.0"
 DEFAULT_VERSION_COUNT = 100
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -883,6 +883,20 @@ def ensure_helpers(game, game_folder, tag, source, platform):
 
 
 def backup_game(game, settings, platform, backup_root, device_name, dry_run, is_fallback=False, quiet=False):
+    """Backs up one game (backup_one_game), then brings the other emulators' copies of a Switch game in step."""
+    game = newest_switch_copy(game, platform)
+    result = backup_one_game(game, settings, platform, backup_root, device_name, dry_run, is_fallback, quiet)
+
+    if not dry_run and result in ("backed_up", "unchanged") and game.get("SwitchCopies"):
+        try:
+            keep_copies_in_step(game, settings, platform, device_name, backup_root)
+        except Exception:
+            log.exception("%s: could not bring the other emulators' copies in step", game["Name"])
+
+    return result
+
+
+def backup_one_game(game, settings, platform, backup_root, device_name, dry_run, is_fallback=False, quiet=False):
     """
     Layout:  <backup root>/<Game>/Current          the newest save (shared by all devices)
                                   /Versions/...    older saves (named by when + who wrote them)
@@ -1348,6 +1362,12 @@ def apply_restore(game, settings, platform, device_name, save_set,
         for folder in save_set.folders():
             remove_empty_folders(folder)
 
+    if game.get("SwitchCopies"):
+        try:
+            keep_copies_in_step(game, settings, platform, device_name, active_root)
+        except Exception:
+            log.exception("%s: could not bring the other emulators' copies in step", game["Name"])
+
     return copied
 
 
@@ -1753,7 +1773,8 @@ def push_to_nas(game_name, local_game, nas_game, device_name):
     local_time = backup_time(read_meta(local_game))
     nas_time = backup_time(nas_meta)
 
-    if has_nas and (local_time is None or (nas_time is not None and local_time <= nas_time + 1)):
+    # The NAS still holding exactly what this device synced last means the local copy is simply newer work.
+    if has_nas and nas_digest != base and (local_time is None or (nas_time is not None and local_time <= nas_time + 1)):
         return "stale_local"         # the local copy is OLDER than what is on the NAS - never push it over
 
     UPLOAD["stage"] = "writing the in-progress marker"
@@ -2408,6 +2429,7 @@ def cmd_launch(args, config, platform):
         log.error("Game '%s' not found (or matched several) in Games.json - launching without save sync.", args.game)
         return subprocess.run(command, cwd=cwd).returncode
 
+    game = newest_switch_copy(game, platform)
     name = game["Name"]
     started = datetime.now()
     record_played(device_name, name)
@@ -2453,6 +2475,12 @@ def cmd_launch(args, config, platform):
                 return 1
         except Exception:
             log.exception("Pre-launch check failed - launching anyway")
+
+    if game.get("SwitchCopies"):
+        try:
+            keep_copies_in_step(game, settings, platform, device_name)       # the emulator you start has the newest save
+        except Exception:
+            log.exception("Could not bring the emulators' copies in step - starting anyway")
 
     stop_timer = start_timer_backups(game, settings, platform, device_name)
     exit_code = subprocess.run(command, cwd=cwd).returncode
@@ -2622,7 +2650,7 @@ def cmd_launchgroup(args, config, platform):
                     log.warning("Check time used up - %d of %d games checked.", checked, len(games))
                     break
 
-                if pre_launch_check(game, settings, platform, device_name) is False:
+                if pre_launch_check(newest_switch_copy(game, platform), settings, platform, device_name) is False:
                     log.info("Launch cancelled by the user.")
                     return 1
 
@@ -2631,6 +2659,18 @@ def cmd_launchgroup(args, config, platform):
             log.warning("NAS %s - skipping the cloud check before launch.", "not reachable" if state == "down" else "too slow")
     except Exception:
         log.exception("Pre-launch check failed - launching anyway")
+
+    in_step = 0
+
+    for game in games:
+        if game.get("SwitchCopies"):
+            try:
+                in_step += keep_copies_in_step(game, settings, platform, device_name)
+            except Exception:
+                log.exception("%s: could not bring the emulators' copies in step", game["Name"])
+
+    if in_step:
+        log.info("Brought %d emulator cop%s up to the newest save.", in_step, "y" if in_step == 1 else "ies")
 
     minutes = float(settings.get("BackupIntervalMinutes", 0) or 0)
     stop = threading.Event()
@@ -3183,6 +3223,7 @@ def cmd_settings(args, config, platform):
 
 
 PROGRAM_FILES = ["savemanager.py", "findsaves.py", "gameinfo.py", "steamsetup.py", "healthcheck.py", "V14-GUIDE.txt",
+                 "categories.py", "switchunify.py",
                  "NasMount.sh", "NasAutoMount.sh", "NasConnect.bat", "GameSaveManager.sh", "GameSaveManager.bat"]
 MERGE_FILES = ["Categories.json", "SwitchTitles.json", "EmulatorTitles.json"]     # new entries added, yours kept
 REPLACE_FILES = ["Games.catalogue.json"]
@@ -3742,6 +3783,19 @@ def cmd_desktopicon(args, config, platform):
     return 0
 
 
+def run_module(module_name, config, platform, args):
+    """Runs categories.py / switchunify.py (they sit next to this file)."""
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+    try:
+        module = __import__(module_name)
+    except ImportError as error:
+        print(f"{module_name}.py is missing next to the program ({error}). Install the full package with Upgrade.")
+        return 1
+
+    return module.run(sys.modules[__name__], config, platform, args)
+
+
 def tools_menu(config, platform):
     settings = config.get("Settings", {})
     device = get_device_name(settings, platform)
@@ -3765,6 +3819,10 @@ def tools_menu(config, platform):
     if primary and fallback:
         items.append(("Sync local backups to the NAS", lambda: cmd_sync(argparse.Namespace(), config, platform)))
 
+    items.append(("Auto-assign categories (genres) to games", lambda: run_module(
+        "categories", config, platform, argparse.Namespace(online=None, yes=False, overwrite=False))))
+    items.append(("Switch: one save for all emulators (set up / check)", lambda: run_module(
+        "switchunify", config, platform, argparse.Namespace(yes=False))))
     items.append(("Show the Steam launch option for a game",
                   lambda: cmd_launchoption(argparse.Namespace(game=None), config, platform)))
 
@@ -4031,20 +4089,38 @@ def ryujinx_folder_id(sub):
     return (parts[-2] if len(parts) >= 2 and re.match(r"^([A-Za-z]:|/)", str(sub)) else parts[0] if parts else "").lower()
 
 
+def switch_emulator_label(base):
+    """The emulator a Switch source entry belongs to: SwitchEmulator, else the end of its name ('zEmu_Switch - Eden' -> Eden)."""
+    if base.get("SwitchEmulator"):
+        return str(base["SwitchEmulator"]).strip()
+
+    name = str(base.get("Name", "")).strip()
+    return name.rsplit(" - ", 1)[-1].strip() if " - " in name else (name or "Switch")
+
+
+def same_path_key(path):
+    """One spelling for comparing paths (Windows ignores case and accepts both slashes)."""
+    return os.path.normcase(os.path.normpath(str(path)))
+
+
 def expand_switch(config, platform):
     """
-    A Games.json entry with  SwitchSource  (yuzu / Eden / Suyu / Citron save folder of ONE profile)
-    and optionally  SwitchRyujinxSource  turns into one game per Switch title ("Switch - <name>").
-    Each device uses its own paths (SwitchSourceSteamDeck ...) but the SAME game names, so the
-    backups are shared between devices and between emulators.
+    Entries with  SwitchSource  (a yuzu / Eden / Suyu / Citron profile save folder) and/or
+    SwitchRyujinxSource  (Ryujinx's bis/user/save folder) are SWITCH SOURCES, not games. Together they
+    turn into ONE game per Switch title ("Switch - <name>"), however many emulators hold a copy of it:
+      - the newest copy on this device is the one that is backed up / restored ("Source"),
+      - every other emulator's copy is listed in SwitchCopies and kept in step with it (keep_copies_in_step),
+        so whichever emulator you start, the same save is there.
+    Each device uses its own paths (SwitchSourceSteamDeck ...) but the SAME game names, so the backups are
+    shared between devices and between emulators.
+    Ryujinx save folders that SwitchTitles.json does not map to a title yet are still backed up, as
+    "Switch - Ryujinx other saves (<device>)" (setting SwitchRyujinxOtherSaves, default on).
     """
     settings = config.get("Settings", {})
     suffix = "" if platform == "Windows" else platform
     titles = load_switch_titles()
     games = []
-    extra = []
     primary, fallback = get_roots(settings, platform)
-
     backed_up = set()
 
     for root in (primary, fallback):
@@ -4055,6 +4131,9 @@ def expand_switch(config, platform):
                 pass
 
     bases = []
+    sources = []           # (entry, emulator, yuzu-type profile folder, Ryujinx folder) on this device
+    groups = {}            # (title ID, name suffix) -> {"base", "candidates": [(path, emulator, kind)], "processes"}
+    ryujinx_roots = []     # (Ryujinx save folder, its entry) for the "other saves" game
 
     for game in config["Games"]:
         if not any(key.startswith("SwitchSource") or key.startswith("SwitchRyujinxSource") for key in game):
@@ -4062,11 +4141,16 @@ def expand_switch(config, platform):
             continue
 
         bases.append(game)
-
+        label = switch_emulator_label(game)
         base_text = game.get("SwitchSource" + suffix)
         ryu_text = game.get("SwitchRyujinxSource" + suffix)
         base = Path(expand_path(base_text, settings, platform)) if base_text else None
         ryu = Path(expand_path(ryu_text, settings, platform)) if ryu_text else None
+
+        if ryu:
+            ryujinx_roots.append((ryu, game))
+
+        sources.append((game, label, base, ryu))
         ids = set()
 
         if base and base.is_dir():
@@ -4081,34 +4165,203 @@ def expand_switch(config, platform):
             if ryu and ryu_sub and ryujinx_path(ryu, ryu_sub).exists():
                 ids.add(title_id)
 
-        for title_id in sorted(ids):
-            info = titles.get(title_id, {})
-            ryu_sub = ryujinx_sub(info, suffix)
-            candidates = []
+        for title_id in ids:
+            groups.setdefault((title_id, game.get("SwitchNameSuffix", "")), {"base": game, "candidates": [], "processes": []})
 
-            if base:
-                candidates.append(base / title_id)
+    # Every title gets a place in EVERY emulator on this device (same name suffix), so whichever one you start has it.
+    for (title_id, name_suffix), group in groups.items():
+        info = titles.get(title_id, {})
+        ryu_sub = ryujinx_sub(info, suffix)
 
-            if ryu and ryu_sub:
-                candidates.append(ryujinx_path(ryu, ryu_sub))
-
-            existing = [c for c in candidates if c.exists()]
-            path = max(existing, key=newest_time) if existing else (candidates[0] if candidates else None)
-
-            if path is None:
+        for game, label, base, ryu in sources:
+            if game.get("SwitchNameSuffix", "") != name_suffix:
                 continue
 
-            virtual = {k: v for k, v in game.items() if not k.startswith("Switch")}
-            virtual["Name"] = f"Switch - {info.get('Name') or title_id}{game.get('SwitchNameSuffix', '')}"
-            virtual["Source" + suffix] = str(path)
-            virtual["Category"] = "Switch"
-            virtual["Virtual"] = True
-            virtual["SwitchTitleID"] = title_id
-            extra.append(virtual)
+            for process in process_names(game):
+                if process not in group["processes"]:
+                    group["processes"].append(process)
+
+            if base:
+                group["candidates"].append((base / title_id, label, "yuzu"))
+
+            if ryu and ryu_sub:
+                group["candidates"].append((ryujinx_path(ryu, ryu_sub), label if label != "Switch" else "Ryujinx", "ryujinx"))
+
+    extra = []
+
+    for (title_id, name_suffix) in sorted(groups):
+        group = groups[(title_id, name_suffix)]
+        unique = {}
+
+        for path, label, kind in group["candidates"]:
+            seen = unique.get(same_path_key(path))
+
+            if seen is None:
+                unique[same_path_key(path)] = (path, label, kind)
+            elif label not in seen[1].split(" + "):                    # Eden and Suyu sharing one folder = one copy
+                unique[same_path_key(path)] = (seen[0], f"{seen[1]} + {label}", kind)
+
+        candidates = list(unique.values())
+        existing = [c for c in candidates if c[0].exists()]
+
+        if existing:
+            source, source_label, _ = max(existing, key=lambda c: newest_time(c[0]))
+        elif candidates:
+            usable = [c for c in candidates if c[0].parent.is_dir()]          # the emulator is installed here
+            source, source_label, _ = (usable or candidates)[0]
+        else:
+            continue
+
+        info = titles.get(title_id, {})
+        virtual = {k: v for k, v in group["base"].items()
+                   if not k.startswith("Switch") and not k.lower().startswith("process")}
+
+        for number, process in enumerate(group["processes"]):
+            virtual["Process" if number == 0 else f"ProcessEmulator{number}"] = process
+
+        virtual["Name"] = f"Switch - {info.get('Name') or title_id}{name_suffix}"
+        virtual["Source" + suffix] = str(source)
+        virtual["Category"] = "Switch"
+        virtual["Virtual"] = True
+        virtual["SwitchTitleID"] = title_id
+        virtual["SwitchEmulators"] = sorted({label for _, label, _ in candidates})
+        virtual["SwitchSourceEmulator"] = source_label
+
+        # Other emulators' copies: a yuzu-type title folder can be created inside an existing profile folder;
+        # a Ryujinx folder only counts once Ryujinx has made it (Ryujinx keeps its own list of save folders).
+        copies = []
+
+        for path, label, kind in candidates:
+            if same_path_key(path) == same_path_key(source):
+                continue
+
+            if path.exists() or (kind == "yuzu" and path.parent.is_dir()):
+                copies.append({"path": str(path), "emulator": label})
+
+        if copies:
+            virtual["SwitchCopies"] = copies
+
+        extra.append(virtual)
+
+    if settings.get("SwitchRyujinxOtherSaves", True) and ryujinx_roots:
+        device_name = get_device_name(settings, platform)
+        mapped = {ryujinx_folder_id(ryujinx_sub(info, suffix) or "") for info in titles.values()} - {""}
+        done = set()
+
+        for ryu, base_game in ryujinx_roots:
+            if same_path_key(ryu) in done or not ryu.is_dir():
+                continue
+
+            done.add(same_path_key(ryu))
+
+            try:
+                folders = [e.name.lower() for e in ryu.iterdir() if e.is_dir()]
+            except OSError:
+                continue
+
+            if not any(folder not in mapped for folder in folders):
+                continue
+
+            other = {k: v for k, v in base_game.items() if not k.startswith("Switch")}
+            other["Name"] = f"Switch - Ryujinx other saves ({device_name})" + (f" {len(done)}" if len(done) > 1 else "")
+            other["Source" + suffix] = str(ryu)
+            other["Exclude"] = list(other.get("Exclude", [])) + [f"{folder}/*" for folder in sorted(mapped)]
+            other["Category"] = "Switch"
+            other["Virtual"] = True
+            other["SwitchOtherSaves"] = True
+            extra.append(other)
 
     config["Games"] = games + extra
     config["_SwitchBases"] = bases
     return config
+
+
+def newest_switch_copy(game, platform):
+    """
+    The same Switch game, with its Source moved to whichever emulator's copy is newest RIGHT NOW.
+    Games.json is read before the game starts, so after playing in another emulator its copy is the
+    newest one; this makes sure that copy is the one backed up (and copied to the others), not the old one.
+    """
+    copies = game.get("SwitchCopies")
+
+    if not copies:
+        return game
+
+    suffix = "" if platform == "Windows" else platform
+    entries = [{"path": game.get("Source" + suffix, ""), "emulator": game.get("SwitchSourceEmulator") or "emulator"}]
+    entries += list(copies)
+
+    def age(entry):
+        path = Path(str(entry["path"]))
+        return newest_time(path) if path.exists() else -1
+
+    best = max(entries, key=age)              # a tie keeps the current Source (it is first)
+
+    if best is entries[0]:
+        return game
+
+    log.info("%s: %s has the newest copy - using it.", game["Name"], best.get("emulator"))
+    newer = dict(game)
+    newer["Source" + suffix] = str(best["path"])
+    newer["SwitchSourceEmulator"] = best.get("emulator")
+    newer["SwitchCopies"] = [e for e in entries if e is not best]
+    return newer
+
+
+def keep_copies_in_step(game, settings, platform, device_name, backup_root=None):
+    """
+    Makes every other emulator's copy of a Switch game the same as the game's save (the newest copy).
+    Before a copy is replaced, its files go into the game's Versions as '<date>__<device>__Unify-<emulator>',
+    so nothing is lost. Setting SwitchUnify: false switches this off. Returns how many copies were updated.
+    """
+    if not game.get("SwitchCopies") or not settings.get("SwitchUnify", True):
+        return 0
+
+    game = newest_switch_copy(game, platform)
+    copies = game.get("SwitchCopies") or []
+
+    suffix = "" if platform == "Windows" else platform
+    source = Path(str(game.get("Source" + suffix, "")))
+    source_files = list_files(source, [], [])
+
+    if not source_files:
+        return 0
+
+    if backup_root is None:
+        backup_root, _ = choose_backup_root(settings, platform)
+
+    updated = 0
+
+    for copy in copies:
+        target = Path(copy["path"])
+        label = safe_name(str(copy.get("emulator") or "emulator"))
+
+        try:
+            target_files = list_files(target, [], [])
+
+            if set(target_files) == set(source_files) and all(
+                    quick_same(source_files[r], target_files[r]) for r in source_files):
+                continue
+
+            if target_files:
+                if backup_root is None:
+                    log.warning("%s: no backup folder for a safety copy - %s's copy was left alone.", game["Name"], label)
+                    continue
+
+                snapshot = backup_root / safe_name(game["Name"]) / "Versions" / make_stamp(
+                    f"{safe_name(device_name)}__Unify-{label}")
+
+                for relative, path in target_files.items():
+                    (snapshot / relative).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(path, snapshot / relative)
+
+            mirror_folder(source, target)
+            updated += 1
+            log.info("%s: %s's copy now matches the newest save.", game["Name"], label)
+        except OSError as error:
+            log.warning("%s: could not update %s's copy (%s) - left as it was.", game["Name"], label, error)
+
+    return updated
 
 
 def write_switch_titles(data):
@@ -4844,6 +5097,17 @@ def run():
     p_service.set_defaults(func=cmd_service)
 
     sub.add_parser("switch", help="list Switch titles found on this device and name unknown ones").set_defaults(func=cmd_switch)
+
+    p_cats = sub.add_parser("categories", help="give every game genres (Categories.json), fix 'Catagory' spellings")
+    p_cats.add_argument("--online", action="store_true", default=None, help="also ask Steam for genres of games no rule knows")
+    p_cats.add_argument("--offline", dest="online", action="store_false", help="never use the internet")
+    p_cats.add_argument("--overwrite", action="store_true", help="also replace genres that are already there")
+    p_cats.add_argument("--yes", action="store_true", help="no questions")
+    p_cats.set_defaults(func=lambda a, c, p: run_module("categories", c, p, a) or 0)
+
+    p_unify = sub.add_parser("switchunify", help="one save per Switch game for all emulators (converts old whole-folder entries)")
+    p_unify.add_argument("--yes", action="store_true", help="no questions")
+    p_unify.set_defaults(func=lambda a, c, p: run_module("switchunify", c, p, a) or 0)
 
     sub.add_parser("tools", help="restore, sync, launch options and other tools").set_defaults(
         func=lambda a, c, p: tools_menu(c, p))
